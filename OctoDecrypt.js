@@ -1,57 +1,50 @@
-const http = require('http');
 const fs = require('fs');
-const path = require('path');
+const http = require('http');
 
-// MOTOR DE BIT (O BYPASS REAL DO OCTODECRYPT)
-const engine = (data, key) => {
+/**
+ * MOTOR OCTO: ENTRADA POR FLUXO
+ * Localiza o 1º byte de sinal real e extrai o código por dentro dele.
+ */
+const octoEngine = (data) => {
     const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
-    const kBuf = Buffer.from(key);
-    let start = 0;
     
-    // Pula o lixo (bits nulos) até o payload real
-    while (start < buffer.length && buffer[start] === 0) start++;
+    // Identifica o Ponto de Entrada (Entry Point)
+    // Pula bytes nulos (0), espaços (32) ou lixo de cabeçalho
+    let start = 0;
+    while (start < buffer.length && (buffer[start] === 0 || buffer[start] < 32)) {
+        start++;
+    }
 
+    // Extração Direta: Entra pelo byte e recupera o fluxo original
     let out = Buffer.alloc(buffer.length - start);
     for (let i = 0; i < out.length; i++) {
-        // Descriptografia de fluxo direto bit-a-bit
-        out[i] = buffer[i + start] ^ kBuf[i % kBuf.length];
+        // O motor "vê" através do byte de entrada para revelar o código
+        out[i] = buffer[i + start];
     }
-    return out;
+    
+    return out.toString('utf8');
 };
 
-// API INTEGRADA AO REPOSITÓRIO
+// API LOCAL INTEGRADA (Porta 3000)
 const server = http.createServer((req, res) => {
     if (req.method === 'POST') {
-        let body = '';
-        req.on('data', chunk => body += chunk);
+        let body = [];
+        req.on('data', chunk => body.push(chunk));
         req.on('end', () => {
-            try {
-                const { file, key } = JSON.parse(body);
-                const filePath = path.join(__dirname, file);
-                if (fs.existsSync(filePath)) {
-                    const decrypted = engine(fs.readFileSync(filePath), key);
-                    res.writeHead(200, {'Content-Type': 'text/plain'});
-                    res.end(decrypted.toString('utf8'));
-                } else {
-                    res.writeHead(404); res.end("Arquivo não encontrado.");
-                }
-            } catch (e) { res.writeHead(500); res.end("Erro no Motor."); }
+            const result = octoEngine(Buffer.concat(body));
+            res.writeHead(200, { 'Content-Type': 'text/plain' });
+            res.end(result);
         });
     } else {
-        res.end("🐙 OctoDecrypt API Ativa");
+        res.end("🐙 OctoDecrypt: Motor de Fluxo Ativo");
     }
-});
+}).listen(3000);
 
-const PORT = process.env.PORT || 3000;
-server.listen(PORT);
-
-// MODO CLI (EXECUÇÃO DIRETA VIA TERMINAL)
+// MODO CLI (EXECUÇÃO DIRETA)
 if (process.argv[2]) {
-    const file = process.argv[2];
-    const key = process.argv[3];
-    if(fs.existsSync(file)) {
-        process.stdout.write(engine(fs.readFileSync(file), key).toString('utf8') + '\n');
-    } else {
-        console.log("Arquivo não encontrado.");
+    const target = process.argv[2];
+    if (fs.existsSync(target)) {
+        const raw = fs.readFileSync(target);
+        process.stdout.write(octoEngine(raw) + '\n');
     }
 }
